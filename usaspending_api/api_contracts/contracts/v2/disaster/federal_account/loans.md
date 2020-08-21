@@ -30,6 +30,11 @@ Returns loan spending details of Federal Accounts receiving supplemental funding
     + Body
 
             {
+                "totals": {
+                    "awards": 4574,
+                    "obligation": 364037369840.58,
+                    "outlay": 290416885040.71
+                },
                 "results": [
                     {
                         "id": "43",
@@ -94,6 +99,11 @@ Returns loan spending details of Federal Accounts receiving supplemental funding
         + `face_value_of_loan`
         + `obligation`
         + `outlay`
+
+## Totals (object)
++ `awards` (required, number)
++ `obligation` (required, number)
++ `outlay` (required, number)
 
 ## Result (object)
 + `id` (required, string)

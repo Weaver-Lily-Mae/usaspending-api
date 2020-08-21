@@ -30,6 +30,11 @@ Returns loan spending details of Object Classes receiving supplemental funding b
     + Body
 
             {
+                "totals": {
+                    "awards": 4574,
+                    "obligation": 364037369840.58,
+                    "outlay": 290416885040.71
+                },
                 "results": [
                     {
                         "id": "43",
