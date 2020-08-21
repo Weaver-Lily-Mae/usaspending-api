@@ -1,4 +1,4 @@
-from django.db.models import F
+from django.db.models import F, Count, Sum
 from rest_framework.response import Response
 from usaspending_api.accounts.models import TreasuryAppropriationAccount
 from usaspending_api.common.cache_decorator import cache_response
@@ -22,7 +22,7 @@ class LoansViewSet(LoansMixin, LoansPaginationMixin, FabaOutlayMixin, DisasterBa
         if self.pagination.sort_key == "face_value_of_loan":
             self.pagination.sort_key = "total_budgetary_resources"
 
-        results = construct_response(list(self.queryset), self.pagination)
+        results = construct_response(self.queryset, self.pagination)
 
         # rename hack to use the Dataclasses, swapping back in desired loan field name
         for result in results["results"]:
@@ -52,4 +52,13 @@ class LoansViewSet(LoansMixin, LoansPaginationMixin, FabaOutlayMixin, DisasterBa
             "total_budgetary_resources": query.face_value_of_loan_column,
         }
 
-        return query.queryset.annotate(**annotations).values(*annotations)
+        aggregations = {
+            "award_count": Count("id"),
+            "obligation_sum": Sum("obligation"),
+            "outlay_sum": Sum("outlay"),
+        }
+
+        return {
+            "totals": query.queryset.annotate(**annotations).aggregate(**aggregations),
+            "results": query.queryset.annotate(**annotations).values(*annotations),
+        }

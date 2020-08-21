@@ -1,4 +1,4 @@
-from django.db.models import Q, Sum, F, Value, Case, When, Min, TextField, IntegerField
+from django.db.models import Q, Sum, F, Value, Case, When, Min, TextField, IntegerField, Count
 from django.db.models.functions import Coalesce, Cast
 from rest_framework.response import Response
 
@@ -22,7 +22,7 @@ from usaspending_api.financial_activities.models import FinancialAccountsByProgr
 
 def construct_response(results: list, pagination: Pagination, strip_total_budgetary_resources=True):
     object_classes = ObjectClassResults()
-    for row in results:
+    for row in results["results"]:
         major_code = row.pop("major_code")
         major_class = MajorClass(
             id=major_code, code=major_code, award_count=0, description=row.pop("major_description")
@@ -30,6 +30,7 @@ def construct_response(results: list, pagination: Pagination, strip_total_budget
         object_classes[major_class].include(ObjectClass(**row))
 
     return {
+        "totals": results["totals"],
         "results": object_classes.finalize(pagination, strip_total_budgetary_resources),
         "page_metadata": get_pagination_metadata(len(object_classes), pagination.limit, pagination.page),
     }
@@ -43,9 +44,9 @@ class ObjectClassSpendingViewSet(PaginationMixin, SpendingMixin, FabaOutlayMixin
     @cache_response()
     def post(self, request):
         if self.spending_type == "award":
-            results = list(self.award_queryset)
+            results = self.award_queryset
         else:
-            results = list(self.total_queryset)
+            results = self.total_queryset
 
         return Response(construct_response(results, self.pagination))
 
@@ -87,14 +88,24 @@ class ObjectClassSpendingViewSet(PaginationMixin, SpendingMixin, FabaOutlayMixin
             "award_count": Value(None, output_field=IntegerField()),
         }
 
+        aggregations = {
+            "award_count": Count("id"),
+            "obligation_sum": Sum("obligation"),
+            "outlay_sum": Sum("outlay"),
+        }
+
         # Assuming it is more performant to fetch all rows once rather than
         #  run a count query and fetch only a page's worth of results
-        return (
+        query = (
             FinancialAccountsByProgramActivityObjectClass.objects.filter(*filters)
             .values("object_class__major_object_class", "object_class__major_object_class_name",)
             .annotate(**annotations)
-            .values(*annotations.keys())
         )
+
+        return {
+            "totals": query.values(*annotations).aggregate(**aggregations),
+            "results": query.values(*annotations.keys()),
+        }
 
     @property
     def award_queryset(self):
@@ -119,14 +130,24 @@ class ObjectClassSpendingViewSet(PaginationMixin, SpendingMixin, FabaOutlayMixin
             "award_count": self.unique_file_d_award_count(),
         }
 
+        aggregations = {
+            "award_count": Count("id"),
+            "obligation_sum": Sum("obligation"),
+            "outlay_sum": Sum("outlay"),
+        }
+
         # Assuming it is more performant to fetch all rows once rather than
         #  run a count query and fetch only a page's worth of results
-        return (
+        query = (
             FinancialAccountsByAwards.objects.filter(*filters)
             .values("object_class__major_object_class", "object_class__major_object_class_name")
             .annotate(**annotations)
-            .values(*annotations.keys())
         )
+
+        return {
+            "totals": query.values(*annotations).aggregate(**aggregations),
+            "results": query.values(*annotations.keys()),
+        }
 
 
 def shared_object_class_annotations():

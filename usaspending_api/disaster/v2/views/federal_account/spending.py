@@ -1,4 +1,4 @@
-from django.db.models import Q, Sum, F, Value, DecimalField, Case, When, OuterRef, Subquery, Func, IntegerField
+from django.db.models import Q, Sum, F, Value, DecimalField, Case, When, OuterRef, Subquery, Func, IntegerField, Count
 from django.db.models.functions import Coalesce
 from rest_framework.response import Response
 
@@ -19,13 +19,14 @@ from usaspending_api.references.models.gtas_sf133_balances import GTASSF133Balan
 
 def construct_response(results: list, pagination: Pagination):
     FederalAccounts = FedAcctResults()
-    for row in results:
+    for row in list(results["results"]):
         FA = FedAccount(
             id=row.pop("fa_id"), code=row.pop("fa_code"), award_count=0, description=row.pop("fa_description")
         )
         FederalAccounts[FA].include(TAS(**row))
 
     return {
+        "totals": results["totals"],
         "results": FederalAccounts.finalize(pagination),
         "page_metadata": get_pagination_metadata(len(FederalAccounts), pagination.limit, pagination.page),
     }
@@ -39,9 +40,9 @@ class SpendingViewSet(PaginationMixin, SpendingMixin, FabaOutlayMixin, DisasterB
     @cache_response()
     def post(self, request):
         if self.spending_type == "award":
-            results = list(self.award_queryset)
+            results = self.award_queryset
         else:
-            results = list(self.total_queryset)
+            results = self.total_queryset
 
         return Response(construct_response(results, self.pagination))
 
@@ -103,9 +104,15 @@ class SpendingViewSet(PaginationMixin, SpendingMixin, FabaOutlayMixin, DisasterB
             ),
         }
 
+        aggregations = {
+            "award_count": Count("id"),
+            "obligation_sum": Sum("obligation"),
+            "outlay_sum": Sum("outlay"),
+        }
+
         # Assuming it is more performant to fetch all rows once rather than
         #  run a count query and fetch only a page's worth of results
-        return (
+        query = (
             FinancialAccountsByProgramActivityObjectClass.objects.filter(*filters)
             .values(
                 "treasury_account__federal_account__id",
@@ -113,8 +120,12 @@ class SpendingViewSet(PaginationMixin, SpendingMixin, FabaOutlayMixin, DisasterB
                 "treasury_account__federal_account__account_title",
             )
             .annotate(**annotations)
-            .values(*annotations.keys())
         )
+
+        return {
+            "totals": query.values(*annotations).aggregate(**aggregations),
+            "results": query.values(*annotations.keys()),
+        }
 
     @property
     def award_queryset(self):
@@ -146,9 +157,15 @@ class SpendingViewSet(PaginationMixin, SpendingMixin, FabaOutlayMixin, DisasterB
             "total_budgetary_resources": Value(None, DecimalField()),  # NULL for award spending
         }
 
+        aggregations = {
+            "award_count": Count("id"),
+            "obligation_sum": Sum("obligation"),
+            "outlay_sum": Sum("outlay"),
+        }
+
         # Assuming it is more performant to fetch all rows once rather than
         #  run a count query and fetch only a page's worth of results
-        return (
+        query = (
             FinancialAccountsByAwards.objects.filter(*filters)
             .values(
                 "treasury_account__federal_account__id",
@@ -158,3 +175,8 @@ class SpendingViewSet(PaginationMixin, SpendingMixin, FabaOutlayMixin, DisasterB
             .annotate(**annotations)
             .values(*annotations.keys())
         )
+
+        return {
+            "totals": query.values(*annotations).aggregate(**aggregations),
+            "results": query.values(*annotations.keys()),
+        }
